@@ -83,10 +83,9 @@ namespace Orleans.Streams
                 "Created {0} {1} for Stream Provider {2} on silo {3} for Queue {4}.",
                 GetType().Name, GrainId.ToDetailedString(), streamProviderName, Silo, QueueId.ToStringWithHashCode());
 
-            numReadMessagesCounter = CounterStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_NUM_READ_MESSAGES, strProviderName));
-            numSentMessagesCounter = CounterStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_NUM_SENT_MESSAGES, strProviderName));
-
-            string statUniquePostfix = strProviderName + "-" + queueId;
+            string statUniquePostfix = strProviderName + "." + QueueId;
+            numReadMessagesCounter = CounterStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_NUM_READ_MESSAGES, statUniquePostfix));
+            numSentMessagesCounter = CounterStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_NUM_SENT_MESSAGES, statUniquePostfix));
             IntValueStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_PUBSUB_CACHE_SIZE, statUniquePostfix), () => pubSubCache.Count);
             IntValueStatistic.FindOrCreate(new StatisticName(StatisticNames.STREAMS_PERSISTENT_STREAM_QUEUE_CACHE_SIZE, statUniquePostfix), () => queueCache !=null ? queueCache.Size : 0);
         }
@@ -168,7 +167,7 @@ namespace Orleans.Streams
             {
                 var tmp = timer;
                 timer = null;
-                tmp.Dispose();
+                Utils.SafeExecute(tmp.Dispose);
             }
 
             var unregisterTasks = new List<Task>();
@@ -321,7 +320,7 @@ namespace Orleans.Streams
                 int maxCacheAddCount = queueCache != null ? queueCache.MaxAddCount : QueueAdapterConstants.UNLIMITED_GET_QUEUE_MSG;
 
                 // loop through the queue until it is empty.
-                while (true)
+                while (timer != null) // timer will be set to null when we are asked to shudown. 
                 {
                     var now = DateTime.UtcNow;
                     // Try to cleanup the pubsub cache at the cadence of 10 times in the configurable StreamInactivityPeriod.
@@ -329,6 +328,15 @@ namespace Orleans.Streams
                     {
                         lastTimeCleanedPubSubCache = now;
                         CleanupPubSubCache(now);
+                    }
+
+                    if (queueCache != null)
+                    {
+                        IList<IBatchContainer> purgedItems;
+                        if (queueCache.TryPurgeFromCache(out purgedItems))
+                        {
+                            await rcvr.MessagesDeliveredAsync(purgedItems);
+                        }
                     }
 
                     if (queueCache != null && queueCache.IsUnderPressure())
@@ -362,7 +370,7 @@ namespace Orleans.Streams
                         if (pubSubCache.TryGetValue(streamId, out streamData))
                         {
                             streamData.RefreshActivity(now);
-                            StartInactiveCursors(streamId, streamData); // if this is an existing stream, start any inactive cursors
+                            StartInactiveCursors(streamData); // if this is an existing stream, start any inactive cursors
                         }
                         else
                         {
@@ -407,17 +415,23 @@ namespace Orleans.Streams
             }
         }
 
-        private void StartInactiveCursors(StreamId streamId, StreamConsumerCollection streamData)
+        private void StartInactiveCursors(StreamConsumerCollection streamData)
         {
-            // if stream is already registered, just wake inactive consumers
-            // get list of inactive consumers
-            var inactiveStreamConsumers = streamData.AllConsumers()
-                .Where(consumer => consumer.State == StreamConsumerDataState.Inactive)
-                .ToList();
-
-            // for each inactive stream
-            foreach (StreamConsumerData consumerData in inactiveStreamConsumers)
-                RunConsumerCursor(consumerData, consumerData.Filter).Ignore();
+            foreach (StreamConsumerData consumerData in streamData.AllConsumers())
+            {
+                if (consumerData.State == StreamConsumerDataState.Inactive)
+                {
+                    // wake up inactive consumers
+                    RunConsumerCursor(consumerData, consumerData.Filter).Ignore();
+                }
+                else
+                {
+                    if (consumerData.Cursor != null)
+                    {
+                        consumerData.Cursor.Refresh();
+                    }
+                }
+            }
         }
 
         private async Task RunConsumerCursor(StreamConsumerData consumerData, IStreamFilterPredicateWrapper filterWrapper)
