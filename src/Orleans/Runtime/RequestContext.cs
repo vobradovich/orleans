@@ -1,32 +1,9 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-﻿using System.Linq;
-﻿using System.Runtime.Remoting.Messaging;
-﻿using Orleans.Serialization;
+using System.Linq;
+using System.Runtime.Remoting.Messaging;
+using Orleans.Serialization;
 
 
 namespace Orleans.Runtime
@@ -122,7 +99,7 @@ namespace Orleans.Runtime
             return retValue;
         }
 
-        internal static void Import(Dictionary<string, object> contextData)
+        public static void Import(Dictionary<string, object> contextData)
         {
             if (PropagateActivityId)
             {
@@ -147,7 +124,7 @@ namespace Orleans.Runtime
             }
         }
 
-        internal static Dictionary<string, object> Export()
+        public static Dictionary<string, object> Export()
         {
             Dictionary<string, object> values = GetContextData();
 
@@ -167,7 +144,7 @@ namespace Orleans.Runtime
             return null;
         }
 
-        internal static void Clear()
+        public static void Clear()
         {
             // Remove the key to prevent passing of its value from this point on
             CallContext.FreeNamedDataSlot(ORLEANS_REQUEST_CONTEXT_KEY);

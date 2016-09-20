@@ -1,32 +1,8 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Web;
@@ -38,33 +14,6 @@ namespace Orleans.Runtime.Host
     /// </summary>
     public static class AzureConfigUtils
     {
-        /// <summary>
-        /// Try to determine the base location for the Azure app directory we are being run from
-        /// </summary>
-        /// <returns>App directory this library is being run from</returns>
-        /// <exception cref="FileNotFoundException">If unable to determine our app directory location</exception>
-        [Obsolete("Use the AppDirectoryLocations enumerable instead")]
-        public static DirectoryInfo AzureAppDirectory
-        {
-            get
-            {
-                DirectoryInfo[] searchedLocations = AppDirectoryLocations;
-
-                foreach (var dir in searchedLocations)
-                    if (dir.Exists)
-                        return dir;
-                
-                // Report error using first (expected) search location
-                var sb = new StringBuilder();
-                sb.Append("Cannot find Azure app directyory. Tried locations:");
-                foreach (var loc in searchedLocations)
-                    sb.Append(" ").Append(loc.FullName);
-                
-                Trace.TraceError(sb.ToString());
-                throw new FileNotFoundException(sb.ToString(), "Azure AppRoot");
-            }
-        }
-
         ///<summary>
         /// Return the default file location for the Orleans client config file (ClientConfiguration.xml)
         ///</summary>
@@ -151,7 +100,7 @@ namespace Orleans.Runtime.Host
                 if (roleRootDir != null)
                 {
                     // Being called from Role startup code - either Azure WorkerRole or WebRole
-                    Assembly assy = Assembly.GetExecutingAssembly();
+                    Assembly assy = typeof(AzureConfigUtils).GetTypeInfo().Assembly;
                     string appRootPath = Path.GetDirectoryName(assy.Location);
                     if (appRootPath != null)
                         locations.Add(new DirectoryInfo(appRootPath));
@@ -171,7 +120,7 @@ namespace Orleans.Runtime.Host
 
             Utils.SafeExecute(() =>
             {
-                Assembly assy = Assembly.GetExecutingAssembly();
+                Assembly assy = typeof(AzureConfigUtils).GetTypeInfo().Assembly;
                 string appRootPath = Path.GetDirectoryName(new Uri(assy.CodeBase).LocalPath);
                 if (appRootPath != null)
                     locations.Add(new DirectoryInfo(appRootPath));

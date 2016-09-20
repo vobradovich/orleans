@@ -1,32 +1,10 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
-using Orleans.Runtime;
 using Orleans.Concurrency;
+using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 
 namespace Orleans
@@ -41,8 +19,8 @@ namespace Orleans
         /// </summary>
         /// <param name="globalConfiguration">the give global configuration</param>
         /// <param name="tryInitTableVersion">whether an attempt will be made to init the underlying table</param>
-        /// <param name="traceLogger">the logger used by the membership table</param>
-        Task InitializeMembershipTable(GlobalConfiguration globalConfiguration, bool tryInitTableVersion, TraceLogger traceLogger);
+        /// <param name="logger">the logger used by the membership table</param>
+        Task InitializeMembershipTable(GlobalConfiguration globalConfiguration, bool tryInitTableVersion, Logger logger);
 
         /// <summary>
         /// Deletes all table entries of the given deploymentId
@@ -172,8 +150,9 @@ namespace Orleans
             list.Sort(
                (x, y) =>
                {
-                   if (x.Item1.Status.Equals(SiloStatus.Dead)) return 1; // put Deads at the end
-                   return 1;
+                   if (x.Item1.Status == SiloStatus.Dead) return 1; // put Deads at the end
+                   if (y.Item1.Status == SiloStatus.Dead) return -1; // put Deads at the end
+                   return String.Compare(x.Item1.SiloName, y.Item1.SiloName, StringComparison.Ordinal);
                });
             Members = list.AsReadOnly();
             Version = version;
@@ -222,56 +201,95 @@ namespace Orleans
                 dead,
                 otherCounts,
                 Version,
-                Utils.EnumerableToString(Members, (tuple) => tuple.Item1.ToFullString()));
+                Utils.EnumerableToString(Members, tuple => tuple.Item1.ToFullString()));
         }
 
         // return a copy of the table removing all dead appereances of dead nodes, except for the last one.
         public MembershipTableData SupressDuplicateDeads()
         {
-            var dead = new Dictionary<string, Tuple<MembershipEntry, string>>();
+            var dead = new Dictionary<IPEndPoint, Tuple<MembershipEntry, string>>();
             // pick only latest Dead for each instance
-            foreach (var next in this.Members.Where(item => item.Item1.Status == SiloStatus.Dead))
+            foreach (var next in Members.Where(item => item.Item1.Status == SiloStatus.Dead))
             {
-                var name = next.Item1.InstanceName;
-                Tuple<MembershipEntry, string> prev = null;
-                if (!dead.TryGetValue(name, out prev))
+                var ipEndPoint = next.Item1.SiloAddress.Endpoint;
+                Tuple<MembershipEntry, string> prev;
+                if (!dead.TryGetValue(ipEndPoint, out prev))
                 {
-                    dead[name] = next;
+                    dead[ipEndPoint] = next;
                 }
                 else
                 {
                     // later dead.
                     if (next.Item1.SiloAddress.Generation.CompareTo(prev.Item1.SiloAddress.Generation) > 0)
-                        dead[name] = next;
+                        dead[ipEndPoint] = next;
                 }
             }
             //now add back non-dead
             List<Tuple<MembershipEntry, string>> all = dead.Values.ToList();
-            all.AddRange(this.Members.Where(item => item.Item1.Status != SiloStatus.Dead));
-            return new MembershipTableData(all, this.Version);
+            all.AddRange(Members.Where(item => item.Item1.Status != SiloStatus.Dead));
+            return new MembershipTableData(all, Version);
         }
     }
 
     [Serializable]
     public class MembershipEntry
     {
+        /// <summary>
+        /// The silo unique identity (ip:port:epoch). Used mainly by the Membership Protocol.
+        /// </summary>
         public SiloAddress SiloAddress { get; set; }
 
-        public string HostName { get; set; }          
-        public SiloStatus Status { get; set; }          
-        public int ProxyPort { get; set; }                   
+        /// <summary>
+        /// The silo status. Managed by the Membership Protocol.
+        /// </summary>
+        public SiloStatus Status { get; set; }
 
-        public string RoleName { get; set; }              // Optional - only for Azure role
-        public string InstanceName { get; set; }          // Optional - only for Azure role
-        public int UpdateZone { get; set; }            // Optional - only for Azure role
-        public int FaultZone { get; set; }             // Optional - only for Azure role
-
-        public DateTime StartTime { get; set; }             // Time this silo was started. For diagnostics.
-        public DateTime IAmAliveTime { get; set; }          // Time this silo updated it was alive. For diagnostics.
-
+        /// <summary>
+        /// The list of silos that suspect this silo. Managed by the Membership Protocol.
+        /// </summary>
         public List<Tuple<SiloAddress, DateTime>> SuspectTimes { get; set; }
 
-        private static readonly List<Tuple<SiloAddress, DateTime>> emptyList = new List<Tuple<SiloAddress, DateTime>>(0);
+        /// <summary>
+        /// Silo to clients TCP port. Set on silo startup.
+        /// </summary>    
+        public int ProxyPort { get; set; }
+
+        /// <summary>
+        /// The DNS host name of the silo. Equals to Dns.GetHostName(). Set on silo startup.
+        /// </summary>
+        public string HostName { get; set; }
+
+        /// <summary>
+        /// the name of the specific silo instance within a cluster. 
+        /// If running in Azure - the name of this role instance. Set on silo startup.
+        /// </summary>
+        public string SiloName { get; set; }
+
+        public string RoleName { get; set; } // Optional - only for Azure role  
+        public int UpdateZone { get; set; }  // Optional - only for Azure role
+        public int FaultZone { get; set; }   // Optional - only for Azure role
+
+        /// <summary>
+        /// Time this silo was started. For diagnostics and troubleshooting only.
+        /// </summary>
+        public DateTime StartTime { get; set; }
+
+        /// <summary>
+        /// the last time this silo reported that it is alive. For diagnostics and troubleshooting only.
+        /// </summary>
+        public DateTime IAmAliveTime { get; set; }
+        
+
+        private static readonly List<Tuple<SiloAddress, DateTime>> EmptyList = new List<Tuple<SiloAddress, DateTime>>(0);
+
+        public void AddSuspector(SiloAddress suspectingSilo, DateTime suspectingTime)
+        {
+            if (SuspectTimes == null)
+                SuspectTimes = new List<Tuple<SiloAddress, DateTime>>();
+
+            var suspector = new Tuple<SiloAddress, DateTime>(suspectingSilo, suspectingTime);
+            SuspectTimes.Add(suspector);
+        }
 
         // partialUpdate arrivies via gossiping with other oracles. In such a case only take the status.
         internal void Update(MembershipEntry updatedSiloEntry)
@@ -283,7 +301,7 @@ namespace Orleans
             ProxyPort = updatedSiloEntry.ProxyPort;
 
             RoleName = updatedSiloEntry.RoleName;
-            InstanceName = updatedSiloEntry.InstanceName;
+            SiloName = updatedSiloEntry.SiloName;
             UpdateZone = updatedSiloEntry.UpdateZone;
             FaultZone = updatedSiloEntry.FaultZone;
 
@@ -295,7 +313,7 @@ namespace Orleans
         internal List<Tuple<SiloAddress, DateTime>> GetFreshVotes(TimeSpan expiration)
         {
             if (SuspectTimes == null)
-                return emptyList;
+                return EmptyList;
             DateTime now = DateTime.UtcNow;
             return SuspectTimes.FindAll(voter =>
                 {
@@ -309,15 +327,6 @@ namespace Orleans
                 });
         }
 
-        internal void AddSuspector(SiloAddress suspectingSilo, DateTime suspectingTime)
-        {
-            if (SuspectTimes == null)
-                SuspectTimes = new List<Tuple<SiloAddress, DateTime>>();
-
-            var suspector = new Tuple<SiloAddress, DateTime>(suspectingSilo, suspectingTime);
-            SuspectTimes.Add(suspector);
-        }
-
         internal void TryUpdateStartTime(DateTime startTime)
         {
             if (StartTime.Equals(default(DateTime)))
@@ -326,7 +335,7 @@ namespace Orleans
 
         public override string ToString()
         {
-            return string.Format("SiloAddress={0} Status={1}", SiloAddress.ToLongString(), Status);
+            return string.Format("SiloAddress={0} SiloName={1} Status={2}", SiloAddress.ToLongString(), SiloName, Status);
         }
 
         internal string ToFullString(bool full = false)
@@ -340,24 +349,24 @@ namespace Orleans
             List<DateTime> timestamps = SuspectTimes == null
                 ? null
                 : SuspectTimes.Select(tuple => tuple.Item2).ToList();
-            return string.Format("[SiloAddress={0} Status={1} HostName={2} ProxyPort={3} " +
-                                 "RoleName={4} InstanceName={5} UpdateZone={6} FaultZone={7} StartTime = {8} IAmAliveTime = {9} {10} {11}]",
+            return string.Format("[SiloAddress={0} SiloName={1} Status={2} HostName={3} ProxyPort={4} " +
+                                 "RoleName={5} UpdateZone={6} FaultZone={7} StartTime = {8} IAmAliveTime = {9} {10} {11}]",
                 SiloAddress.ToLongString(),
+                SiloName,
                 Status,
                 HostName,
                 ProxyPort,
                 RoleName,
-                InstanceName,
                 UpdateZone,
                 FaultZone,
-                TraceLogger.PrintDate(StartTime),
-                TraceLogger.PrintDate(IAmAliveTime),
+                LogFormatter.PrintDate(StartTime),
+                LogFormatter.PrintDate(IAmAliveTime),
                 suspecters == null
                     ? ""
-                    : "Suspecters = " + Utils.EnumerableToString(suspecters, (SiloAddress sa) => sa.ToLongString()),
+                    : "Suspecters = " + Utils.EnumerableToString(suspecters, sa => sa.ToLongString()),
                 timestamps == null
                     ? ""
-                    : "SuspectTimes = " + Utils.EnumerableToString(timestamps, TraceLogger.PrintDate)
+                    : "SuspectTimes = " + Utils.EnumerableToString(timestamps, LogFormatter.PrintDate)
                 );
         }
     }

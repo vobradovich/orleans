@@ -1,31 +1,7 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -277,7 +253,7 @@ namespace Orleans.Runtime
             return false;
         }
 
-        public static void SafeExecute(Action action, TraceLogger logger = null, string caller = null)
+        public static void SafeExecute(Action action, Logger logger = null, string caller = null)
         {
             SafeExecute(action, logger, caller==null ? (Func<string>)null : () => caller);
         }
@@ -285,7 +261,7 @@ namespace Orleans.Runtime
         // a function to safely execute an action without any exception being thrown.
         // callerGetter function is called only in faulty case (now string is generated in the success case).
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
-        public static void SafeExecute(Action action, TraceLogger logger, Func<string> callerGetter)
+        public static void SafeExecute(Action action, Logger logger, Func<string> callerGetter)
         {
             try
             {
@@ -300,11 +276,15 @@ namespace Orleans.Runtime
                         string caller = null;
                         if (callerGetter != null)
                         {
-                            caller = callerGetter();
+                            try
+                            {
+                                caller = callerGetter();
+                            }catch (Exception) { }
                         }
                         foreach (var e in exc.FlattenAggregate())
                         {
-                            logger.Warn(ErrorCode.Runtime_Error_100325, String.Format("Ignoring {0} exception thrown from an action called by {1}.", e.GetType().FullName, caller ?? String.Empty), exc);
+                            logger.Warn(ErrorCode.Runtime_Error_100325,
+                                $"Ignoring {e.GetType().FullName} exception thrown from an action called by {caller ?? String.Empty}.", exc);
                         }
                     }
                 }
@@ -329,31 +309,6 @@ namespace Orleans.Runtime
         public static TimeSpan Since(DateTime start)
         {
             return DateTime.UtcNow.Subtract(start);
-        }
-
-        public static List<T> ObjectToList<T>(object data)
-        {
-            if (data is List<T>) return (List<T>) data;
-
-            T[] dataArray;
-            if (data is ArrayList)
-            {
-                dataArray = (T[]) (data as ArrayList).ToArray(typeof(T));
-            }
-            else if (data is ICollection<T>)
-            {
-                dataArray = (data as ICollection<T>).ToArray();
-            }
-            else
-            {
-                throw new InvalidCastException(string.Format(
-                    "Cannot convert type {0} to type List<{1}>",
-                    TypeUtils.GetFullName(data.GetType()),
-                    TypeUtils.GetFullName(typeof(T))));
-            }
-            var list = new List<T>();
-            list.AddRange(dataArray);
-            return list;
         }
 
         public static List<Exception> FlattenAggregate(this Exception exc)
@@ -396,42 +351,21 @@ namespace Orleans.Runtime
             }
         }
 
-        internal static MethodInfo GetStaticMethodThroughReflection(string assemblyName, string className, string methodName, Type[] argumentTypes)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static string GetStackTrace(int skipFrames = 0)
         {
-            var asm = Assembly.Load(assemblyName);
-            if (asm == null)
-                throw new InvalidOperationException(string.Format("Cannot find assembly {0}", assemblyName));
-
-            var cl = asm.GetType(className);
-            if (cl == null)
-                throw new InvalidOperationException(string.Format("Cannot find class {0} in assembly {1}", className, assemblyName));
-
-            MethodInfo method;
-            method = argumentTypes == null
-                ? cl.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-                : cl.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, null, argumentTypes, null);
-
-            if (method == null)
-                throw new InvalidOperationException(string.Format("Cannot find static method {0} of class {1} in assembly {2}", methodName, className, assemblyName));
-
-            return method;
-        }
-
-        internal static object InvokeStaticMethodThroughReflection(string assemblyName, string className, string methodName, Type[] argumentTypes, object[] arguments)
-        {
-            var method = GetStaticMethodThroughReflection(assemblyName, className, methodName, argumentTypes);
-            return method.Invoke(null, arguments);
-        }
-
-        internal static Type LoadTypeThroughReflection(string assemblyName, string className)
-        {
-            var asm = Assembly.Load(assemblyName);
-            if (asm == null) throw new InvalidOperationException(string.Format("Cannot find assembly {0}", assemblyName));
-
-            var cl = asm.GetType(className);
-            if (cl == null) throw new InvalidOperationException(string.Format("Cannot find class {0} in assembly {1}", className, assemblyName));
-
-            return cl;
+            skipFrames += 1; //skip this method from the stack trace
+#if NETSTANDARD
+            skipFrames += 2; //skip the 2 Environment.StackTrace related methods.
+            var stackTrace = Environment.StackTrace;
+            for (int i = 0; i < skipFrames; i++)
+            {
+                stackTrace = stackTrace.Substring(stackTrace.IndexOf(Environment.NewLine) + Environment.NewLine.Length);
+            }
+            return stackTrace;
+#else
+            return new System.Diagnostics.StackTrace(skipFrames).ToString();
+#endif
         }
     }
 }

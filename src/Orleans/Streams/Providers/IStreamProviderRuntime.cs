@@ -1,31 +1,8 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Orleans.Runtime;
 using Orleans.Providers;
+using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 
 namespace Orleans.Streams
@@ -49,17 +26,6 @@ namespace Orleans.Streams
         void RegisterSystemTarget(ISystemTarget target);
 
         void UnRegisterSystemTarget(ISystemTarget target);
-
-        /// <summary>
-        /// Register a timer to send regular callbacks to this grain.
-        /// This timer will keep the current grain from being deactivated.
-        /// </summary>
-        /// <param name="callback"></param>
-        /// <param name="state"></param>
-        /// <param name="dueTime"></param>
-        /// <param name="period"></param>
-        /// <returns></returns>
-        IDisposable RegisterTimer(Func<object, Task> asyncCallback, object state, TimeSpan dueTime, TimeSpan period);
 
         /// <summary>
         /// Binds an extension to an addressable object, if not already done.
@@ -90,12 +56,6 @@ namespace Orleans.Streams
         /// <param name="pubSubType"></param>
         /// <returns></returns>
         bool InSilo { get; }
-
-        /// <summary>
-        /// Invoke the given async function from within a valid Orleans scheduler context.
-        /// </summary>
-        /// <param name="asyncFunc"></param>
-        Task InvokeWithinSchedulingContextAsync(Func<Task> asyncFunc, object context);
 
         object GetCurrentSchedulingContext();
     }
@@ -155,59 +115,65 @@ namespace Orleans.Streams
         public static readonly TimeSpan DEFAULT_SILO_MATURITY_PERIOD = TimeSpan.FromMinutes(2);
 
 
-        public TimeSpan GetQueueMsgsTimerPeriod { get; private set; }
-        public TimeSpan InitQueueTimeout { get; private set; }
-        public TimeSpan MaxEventDeliveryTime { get; private set; }
-        public TimeSpan StreamInactivityPeriod { get; private set; }
-        public StreamQueueBalancerType BalancerType { get; private set; }
-        public StreamPubSubType PubSubType { get; private set; }
-        public TimeSpan SiloMaturityPeriod { get; private set; }
+        public TimeSpan GetQueueMsgsTimerPeriod { get; set; } = DEFAULT_GET_QUEUE_MESSAGES_TIMER_PERIOD;
+        public TimeSpan InitQueueTimeout { get; set; } = DEFAULT_INIT_QUEUE_TIMEOUT;
+        public TimeSpan MaxEventDeliveryTime { get; set; } = DEFAULT_MAX_EVENT_DELIVERY_TIME;
+        public TimeSpan StreamInactivityPeriod { get; set; } = DEFAULT_STREAM_INACTIVITY_PERIOD;
+        public StreamQueueBalancerType BalancerType { get; set; } = DEFAULT_STREAM_QUEUE_BALANCER_TYPE;
+        public StreamPubSubType PubSubType { get; set; } = DEFAULT_STREAM_PUBSUB_TYPE;
+        public TimeSpan SiloMaturityPeriod { get; set; } = DEFAULT_SILO_MATURITY_PERIOD;
 
+        public PersistentStreamProviderConfig()
+        {
+        }
 
         public PersistentStreamProviderConfig(IProviderConfiguration config)
         {
             string timePeriod;
-            if (!config.Properties.TryGetValue(GET_QUEUE_MESSAGES_TIMER_PERIOD, out timePeriod))
-                GetQueueMsgsTimerPeriod = DEFAULT_GET_QUEUE_MESSAGES_TIMER_PERIOD;
-            else
+            if (config.Properties.TryGetValue(GET_QUEUE_MESSAGES_TIMER_PERIOD, out timePeriod))
                 GetQueueMsgsTimerPeriod = ConfigUtilities.ParseTimeSpan(timePeriod,
                     "Invalid time value for the " + GET_QUEUE_MESSAGES_TIMER_PERIOD + " property in the provider config values.");
 
             string timeout;
-            if (!config.Properties.TryGetValue(INIT_QUEUE_TIMEOUT, out timeout))
-                InitQueueTimeout = DEFAULT_INIT_QUEUE_TIMEOUT;
-            else
+            if (config.Properties.TryGetValue(INIT_QUEUE_TIMEOUT, out timeout))
                 InitQueueTimeout = ConfigUtilities.ParseTimeSpan(timeout,
                     "Invalid time value for the " + INIT_QUEUE_TIMEOUT + " property in the provider config values.");
 
             string balanceTypeString;
-            BalancerType = !config.Properties.TryGetValue(QUEUE_BALANCER_TYPE, out balanceTypeString)
-                ? DEFAULT_STREAM_QUEUE_BALANCER_TYPE
-                : (StreamQueueBalancerType)Enum.Parse(typeof(StreamQueueBalancerType), balanceTypeString);
+            if (config.Properties.TryGetValue(QUEUE_BALANCER_TYPE, out balanceTypeString))
+                BalancerType = (StreamQueueBalancerType)Enum.Parse(typeof(StreamQueueBalancerType), balanceTypeString);
 
-            if (!config.Properties.TryGetValue(MAX_EVENT_DELIVERY_TIME, out timeout))
-                MaxEventDeliveryTime = DEFAULT_MAX_EVENT_DELIVERY_TIME;
-            else
+            if (config.Properties.TryGetValue(MAX_EVENT_DELIVERY_TIME, out timeout))
                 MaxEventDeliveryTime = ConfigUtilities.ParseTimeSpan(timeout,
                     "Invalid time value for the " + MAX_EVENT_DELIVERY_TIME + " property in the provider config values.");
 
-            if (!config.Properties.TryGetValue(STREAM_INACTIVITY_PERIOD, out timeout))
-               StreamInactivityPeriod = DEFAULT_STREAM_INACTIVITY_PERIOD;
-            else
+            if (config.Properties.TryGetValue(STREAM_INACTIVITY_PERIOD, out timeout))
                 StreamInactivityPeriod = ConfigUtilities.ParseTimeSpan(timeout,
                     "Invalid time value for the " + STREAM_INACTIVITY_PERIOD + " property in the provider config values.");
 
             string pubSubTypeString;
-            PubSubType = !config.Properties.TryGetValue(STREAM_PUBSUB_TYPE, out pubSubTypeString)
-                ? DEFAULT_STREAM_PUBSUB_TYPE
-                : (StreamPubSubType)Enum.Parse(typeof(StreamPubSubType), pubSubTypeString);
+            if (config.Properties.TryGetValue(STREAM_PUBSUB_TYPE, out pubSubTypeString))
+                PubSubType = (StreamPubSubType)Enum.Parse(typeof(StreamPubSubType), pubSubTypeString);
 
             string immaturityPeriod;
-            if (!config.Properties.TryGetValue(SILO_MATURITY_PERIOD, out immaturityPeriod))
-                SiloMaturityPeriod = DEFAULT_SILO_MATURITY_PERIOD;
-            else
+            if (config.Properties.TryGetValue(SILO_MATURITY_PERIOD, out immaturityPeriod))
                 SiloMaturityPeriod = ConfigUtilities.ParseTimeSpan(immaturityPeriod,
                     "Invalid time value for the " + SILO_MATURITY_PERIOD + " property in the provider config values.");
+        }
+
+        /// <summary>
+        /// Utility function to convert config to property bag for use in stream provider configuration
+        /// </summary>
+        /// <returns></returns>
+        public void WriteProperties(Dictionary<string, string> properties)
+        {
+            properties[GET_QUEUE_MESSAGES_TIMER_PERIOD] = ConfigUtilities.ToParseableTimeSpan(GetQueueMsgsTimerPeriod);
+            properties[INIT_QUEUE_TIMEOUT] = ConfigUtilities.ToParseableTimeSpan(InitQueueTimeout);
+            properties[QUEUE_BALANCER_TYPE] = BalancerType.ToString();
+            properties[MAX_EVENT_DELIVERY_TIME] = ConfigUtilities.ToParseableTimeSpan(MaxEventDeliveryTime);
+            properties[STREAM_INACTIVITY_PERIOD] = ConfigUtilities.ToParseableTimeSpan(StreamInactivityPeriod);
+            properties[STREAM_PUBSUB_TYPE] = PubSubType.ToString();
+            properties[SILO_MATURITY_PERIOD] = ConfigUtilities.ToParseableTimeSpan(SiloMaturityPeriod);
         }
 
         public override string ToString()

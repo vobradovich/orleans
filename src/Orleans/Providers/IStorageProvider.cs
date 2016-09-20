@@ -1,33 +1,9 @@
-﻿/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Net;
 using System.Runtime.Serialization;
 using System.Threading.Tasks;
-
-using Orleans.Runtime;
 using Orleans.Providers;
+using Orleans.Runtime;
 
 namespace Orleans.Storage
 {
@@ -36,14 +12,10 @@ namespace Orleans.Storage
     /// </summary>
     public interface IStorageProvider : IProvider
     {
-        /// <summary>TraceLogger used by this storage provider instance.</summary>
-        /// <returns>Reference to the TraceLogger object used by this provider.</returns>
+        /// <summary>Logger used by this storage provider instance.</summary>
+        /// <returns>Reference to the Logger object used by this provider.</returns>
         /// <seealso cref="Logger"/>
         Logger Log { get; }
-
-        /// <summary>Close function for this storage provider instance.</summary>
-        /// <returns>Completion promise for the Close operation on this provider.</returns>
-        Task Close();
 
         /// <summary>Read data function for this storage provider instance.</summary>
         /// <param name="grainType">Type of this grain [fully qualified class name]</param>
@@ -97,9 +69,11 @@ namespace Orleans.Storage
         public BadProviderConfigException(string msg, Exception exc)
             : base(msg, exc)
         { }
+#if !NETSTANDARD
         protected BadProviderConfigException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         { }
+#endif
     }
 
     /// <summary>
@@ -122,9 +96,11 @@ namespace Orleans.Storage
         public InconsistentStateException(string msg, Exception exc)
             : base(msg, exc)
         { }
+#if !NETSTANDARD
         protected InconsistentStateException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {}
+#endif
 
         public InconsistentStateException(
           string errorMsg,

@@ -1,26 +1,3 @@
-﻿/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -57,7 +34,7 @@ namespace Orleans.Runtime.Host
     /// </remarks>
     public class ZooKeeperBasedMembershipTable : IMembershipTable, IGatewayListProvider
     {
-        private TraceLogger logger;
+        private Logger Logger;
 
         private const int ZOOKEEPER_CONNECTION_TIMEOUT = 2000;
 
@@ -78,9 +55,9 @@ namespace Orleans.Runtime.Host
 
         private TimeSpan maxStaleness;
 
-        public Task InitializeGatewayListProvider(ClientConfiguration config, TraceLogger traceLogger)
+        public Task InitializeGatewayListProvider(ClientConfiguration config, Logger logger)
         {
-            InitConfig(traceLogger,config.DataConnectionString, config.DeploymentId);
+            InitConfig(logger,config.DataConnectionString, config.DeploymentId);
             maxStaleness = config.GatewayListRefreshPeriod;
             return TaskDone.Done;
         }
@@ -90,11 +67,11 @@ namespace Orleans.Runtime.Host
         /// </summary>
         /// <param name="config">The configuration for this instance.</param>
         /// <param name="tryInitPath">if set to true, we'll try to create a node named "/DeploymentId"</param>
-        /// <param name="traceLogger">The logger to be used by this instance</param>
+        /// <param name="logger">The logger to be used by this instance</param>
         /// <returns></returns>
-        public async Task InitializeMembershipTable(GlobalConfiguration config, bool tryInitPath, TraceLogger traceLogger)
+        public async Task InitializeMembershipTable(GlobalConfiguration config, bool tryInitPath, Logger logger)
         {
-            InitConfig(traceLogger, config.DataConnectionString, config.DeploymentId);
+            InitConfig(logger, config.DataConnectionString, config.DeploymentId);
             // even if I am not the one who created the path, 
             // try to insert an initial path if it is not already there,
             // so we always have the path, before this silo starts working.
@@ -115,10 +92,10 @@ namespace Orleans.Runtime.Host
             });
         }
 
-        private void InitConfig(TraceLogger traceLogger, string dataConnectionString, string deploymentId)
+        private void InitConfig(Logger logger, string dataConnectionString, string deploymentId)
         {
-            watcher = new ZooKeeperWatcher(traceLogger);
-            logger = traceLogger;
+            watcher = new ZooKeeperWatcher(logger);
+            Logger = logger;
             deploymentPath = "/" + deploymentId;
             deploymentConnectionString = dataConnectionString + deploymentPath;
             rootConnectionString = dataConnectionString;
@@ -203,9 +180,10 @@ namespace Orleans.Runtime.Host
             return UsingZookeeper(zk => zk.setDataAsync(rowIAmAlivePath, newRowIAmAliveData));
         }
 
-        public IList<Uri> GetGateways()
+        public async Task<IList<Uri>> GetGateways()
         {
-            return ReadAll().Result.Members.Select(e => e.Item1).
+            var membershipTableData = await ReadAll();
+            return membershipTableData.Members.Select(e => e.Item1).
                                             Where(m => m.Status == SiloStatus.Active && m.ProxyPort != 0).
                                             Select(m =>
                                             {
@@ -320,10 +298,10 @@ namespace Orleans.Runtime.Host
         /// </summary>
         private class ZooKeeperWatcher : Watcher
         {
-            private readonly TraceLogger logger;
-            public ZooKeeperWatcher(TraceLogger traceLogger)
+            private readonly Logger logger;
+            public ZooKeeperWatcher(Logger logger)
             {
-                logger = traceLogger;
+                this.logger = logger;
             }
 
             public override Task process(WatchedEvent @event)

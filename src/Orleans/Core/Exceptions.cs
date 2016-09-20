@@ -1,29 +1,8 @@
-/*
-Project Orleans Cloud Service SDK ver. 1.0
- 
-Copyright (c) Microsoft Corporation
- 
-All rights reserved.
- 
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the ""Software""), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.Serialization;
+using Orleans.Core;
 
 namespace Orleans.Runtime
 {
@@ -36,18 +15,19 @@ namespace Orleans.Runtime
     /// </remarks>
     [Serializable]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1058:TypesShouldNotExtendCertainBaseTypes")]
-    public class OrleansException : ApplicationException
+    public class OrleansException : Exception
     {
         public OrleansException() : base("Unexpected error.") { }
 
         public OrleansException(string message) : base(message) { }
 
         public OrleansException(string message, Exception innerException) : base(message, innerException) { }
-
+#if !NETSTANDARD
         protected OrleansException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
         }
+#endif
     }
 
     /// <summary>
@@ -64,10 +44,16 @@ namespace Orleans.Runtime
     {
         public GatewayTooBusyException() : base("Gateway too busy") { }
 
+        public GatewayTooBusyException(string message) : base(message) { }
+
+        public GatewayTooBusyException(string message, Exception innerException) : base(message, innerException) { }
+
+#if !NETSTANDARD
         protected GatewayTooBusyException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
         }
+#endif
     }
 
     /// <summary>
@@ -85,13 +71,19 @@ namespace Orleans.Runtime
     {
         public LimitExceededException() : base("Limit exceeded") { }
 
+        public LimitExceededException(string message) : base(message) { }
+
+        public LimitExceededException(string message, Exception innerException) : base(message, innerException) { }
+
         public LimitExceededException(string limitName, int current, int threshold, object extraInfo) 
             : base(string.Format("Limit exceeded {0} Current={1} Threshold={2} {3}", limitName, current, threshold, extraInfo)) { }
 
-        public LimitExceededException(SerializationInfo info, StreamingContext context)
+#if !NETSTANDARD
+        protected LimitExceededException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
         }
+#endif
     }
 
     /// <summary>
@@ -111,23 +103,28 @@ namespace Orleans.Runtime
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1032:ImplementStandardExceptionConstructors")]
     public class DeadlockException : OrleansException
     {
-        internal IEnumerable<Tuple<GrainId, int, int>> CallChain { get; private set; }
+        internal IEnumerable<Tuple<GrainId, string>> CallChain { get; private set; }
 
         public DeadlockException() : base("Deadlock between grain calls") {}
 
-        internal DeadlockException(IEnumerable<Tuple<GrainId, int, int>> callChain)
-            : base(String.Format("Deadlock Exception for grain call chain {0}.", Utils.EnumerableToString(callChain, 
-                            elem => String.Format("{0}.{1}.{2}", elem.Item1, elem.Item2, elem.Item3)))) 
+        public DeadlockException(string message) : base(message) { }
+
+        public DeadlockException(string message, Exception innerException) : base(message, innerException) { }
+
+        internal DeadlockException(List<RequestInvocationHistory> callChain)
+            : base(String.Format("Deadlock Exception for grain call chain {0}.", Utils.EnumerableToString(callChain,
+                        elem => String.Format("{0}.{1}", elem.GrainId, elem.DebugContext))))
         {
-            CallChain = callChain;
+            CallChain = callChain.Select(req => new Tuple<GrainId, string>(req.GrainId, req.DebugContext)).ToList();
         }
 
+#if !NETSTANDARD
         protected DeadlockException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
             if (info != null)
             {
-                this.CallChain = (IEnumerable<Tuple<GrainId, int, int>>)info.GetValue("CallChain", typeof(IEnumerable<Tuple<GrainId, int, int>>));
+                CallChain = (IEnumerable<Tuple<GrainId, string>>)info.GetValue("CallChain", typeof(IEnumerable<Tuple<GrainId, string>>));
             }
         }
 
@@ -135,11 +132,12 @@ namespace Orleans.Runtime
         {
             if (info != null)
             {
-                info.AddValue("CallChain", this.CallChain, typeof(IEnumerable<Tuple<GrainId, int, int>>));
+                info.AddValue("CallChain", this.CallChain, typeof(IEnumerable<Tuple<GrainId, string>>));
             }
 
             base.GetObjectData(info, context);
         }
+#endif
     }
 
     /// <summary>
@@ -150,10 +148,64 @@ namespace Orleans.Runtime
     {
         public GrainExtensionNotInstalledException() : base("GrainExtensionNotInstalledException") { }
         public GrainExtensionNotInstalledException(string msg) : base(msg) { }
+        public GrainExtensionNotInstalledException(string message, Exception innerException) : base(message, innerException) { }
 
-        public GrainExtensionNotInstalledException(SerializationInfo info, StreamingContext context)
+#if !NETSTANDARD
+        protected GrainExtensionNotInstalledException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         { }
+#endif
+    }
+
+    /// <summary>
+    /// Signifies that an request was cancelled due to target silo unavailability.
+    /// </summary>
+    [Serializable]
+    public class SiloUnavailableException : OrleansException
+    {
+        public SiloUnavailableException() : base("SiloUnavailableException") { }
+        public SiloUnavailableException(string msg) : base(msg) { }
+        public SiloUnavailableException(string message, Exception innerException) : base(message, innerException) { }
+
+#if !NETSTANDARD
+        protected SiloUnavailableException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        { }
+#endif
+    }
+
+    /// <summary>
+    /// Signifies that an operation was attempted on an invalid SchedulingContext.
+    /// </summary>
+    [Serializable]
+    internal class InvalidSchedulingContextException : OrleansException
+    {
+        public InvalidSchedulingContextException() : base("InvalidSchedulingContextException") { }
+        public InvalidSchedulingContextException(string msg) : base(msg) { }
+        public InvalidSchedulingContextException(string message, Exception innerException) : base(message, innerException) { }
+
+#if !NETSTANDARD
+        protected InvalidSchedulingContextException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        { }
+#endif
+    }
+
+    /// <summary>
+    /// Indicates that a client is not longer reachable.
+    /// </summary>
+    [Serializable]
+    public class ClientNotAvailableException : OrleansException
+    {
+        internal ClientNotAvailableException(IGrainIdentity clientId) : base("No activation for client " + clientId) { }
+        internal ClientNotAvailableException(string msg) : base(msg) { }
+        internal ClientNotAvailableException(string message, Exception innerException) : base(message, innerException) { }
+
+#if !NETSTANDARD
+        protected ClientNotAvailableException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        { }
+#endif
     }
 }
 
