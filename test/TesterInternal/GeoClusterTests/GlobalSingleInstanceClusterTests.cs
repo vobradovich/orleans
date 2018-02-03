@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -11,6 +11,7 @@ using TestGrainInterfaces;
 using Orleans.Runtime.Configuration;
 using Xunit;
 using Xunit.Abstractions;
+using Tester;
 
 // ReSharper disable InconsistentNaming
 
@@ -18,32 +19,32 @@ namespace Tests.GeoClusterTests
 {
     // We need use ClientWrapper to load a client object in a new app domain. 
     // This allows us to create multiple clients that are connected to different silos.
-
+    [TestCategory("GeoCluster")]
     public class GlobalSingleInstanceClusterTests : TestingClusterHost
     {
-
         public GlobalSingleInstanceClusterTests(ITestOutputHelper output) : base(output)
-        { }
+        {
+        }
 
         /// <summary>
         /// Run all tests on a small configuration (two clusters, one silo each, one client each)
         /// </summary>
         /// <returns></returns>
-        [Fact, TestCategory("Functional"), TestCategory("GeoCluster")]
+        [SkippableFact, TestCategory("Functional")]
         public async Task All_Small()
         {
             await Setup_Clusters(false);
             numGrains = 600;
             await RunWithTimeout("IndependentCreation", 5000, IndependentCreation);
             await RunWithTimeout("CreationRace", 10000, CreationRace);
-            await RunWithTimeout("ConflictResolution", 20000, ConflictResolution);
+            await RunWithTimeout("ConflictResolution", 40000, ConflictResolution);
         }
 
         /// <summary>
         /// Run all tests on a larger configuration (two clusters with 3 or 4 silos, respectively, and two clients each)
         /// </summary>
         /// <returns></returns>
-        [Fact, TestCategory("GeoCluster")]
+        [SkippableFact]
         public async Task All_Large()
         {
             await Setup_Clusters(true);
@@ -58,22 +59,25 @@ namespace Tests.GeoClusterTests
 
         public class ClientWrapper : ClientWrapperBase
         {
+            public static readonly Func<string, int, string, Action<ClientConfiguration>, ClientWrapper> Factory =
+                (name, gwPort, clusterId, configUpdater) => new ClientWrapper(name, gwPort, clusterId, configUpdater);
+
             public ClientWrapper(string name, int gatewayport, string clusterId, Action<ClientConfiguration> customizer) : base(name, gatewayport, clusterId, customizer)
             {
-                systemManagement = GrainClient.GrainFactory.GetGrain<IManagementGrain>(RuntimeInterfaceConstants.SYSTEM_MANAGEMENT_ID);
+                this.systemManagement = this.GrainFactory.GetGrain<IManagementGrain>(0);
             }
 
             public int CallGrain(int i)
             {
-                var grainRef = GrainClient.GrainFactory.GetGrain<IClusterTestGrain>(i);
+                var grainRef = this.GrainFactory.GetGrain<IClusterTestGrain>(i);
                 Task<int> toWait = grainRef.SayHelloAsync();
                 toWait.Wait();
-                return toWait.Result;
+                return toWait.GetResult();
             }
 
             public void InjectMultiClusterConf(params string[] args)
             {
-                systemManagement.InjectMultiClusterConfiguration(args).Wait();
+                systemManagement.InjectMultiClusterConfiguration(args).GetResult();
             }
 
             IManagementGrain systemManagement;
@@ -104,26 +108,26 @@ namespace Tests.GeoClusterTests
                 // Create two clusters, each with a single silo.
                 cluster0 = "cluster0";
                 cluster1 = "cluster1";
-                NewGeoCluster(globalserviceid, cluster0, largesetup ? 3 : 1, configurationcustomizer);
-                NewGeoCluster(globalserviceid, cluster1, largesetup ? 4 : 1, configurationcustomizer);
+                NewGeoCluster(globalserviceid, cluster0, (short)(largesetup ? 3 : 1), configurationcustomizer);
+                NewGeoCluster(globalserviceid, cluster1, (short)(largesetup ? 4 : 1), configurationcustomizer);
 
                 if (!largesetup)
                 {
                     // Create one client per cluster
                     clients = new ClientWrapper[]
                     {
-                       NewClient<ClientWrapper>(cluster0, 0),
-                       NewClient<ClientWrapper>(cluster1, 0),
+                       NewClient<ClientWrapper>(cluster0, 0, ClientWrapper.Factory),
+                       NewClient<ClientWrapper>(cluster1, 0, ClientWrapper.Factory),
                     };
                 }
                 else
                 {
                     clients = new ClientWrapper[]
                     {
-                       NewClient<ClientWrapper>(cluster0, 0),
-                       NewClient<ClientWrapper>(cluster1, 0),
-                       NewClient<ClientWrapper>(cluster0, 1),
-                       NewClient<ClientWrapper>(cluster1, 1),
+                       NewClient<ClientWrapper>(cluster0, 0, ClientWrapper.Factory),
+                       NewClient<ClientWrapper>(cluster1, 0, ClientWrapper.Factory),
+                       NewClient<ClientWrapper>(cluster0, 1, ClientWrapper.Factory),
+                       NewClient<ClientWrapper>(cluster1, 1, ClientWrapper.Factory),
                     };
                 }
                 await WaitForLivenessToStabilizeAsync();
@@ -180,7 +184,7 @@ namespace Tests.GeoClusterTests
             Assert.Equal(requested0, base_requested0);
             Assert.Equal(requested1, base_requested1);
 
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         #endregion
@@ -232,7 +236,11 @@ namespace Tests.GeoClusterTests
 
                 // Given a config file, create client starts a client in a new appdomain. We also create a thread on which the client will run.
                 // The thread takes a "ClientThreadArgs" as argument.
-                var thread = new Thread(ThreadFunc);
+                var thread = new Thread(ThreadFunc)
+                {
+                    IsBackground = true,
+                    Name = $"{this.GetType()}.{nameof(CreationRace)}"
+                };
                 var threadFuncArgs = new ClientThreadArgs
                 {
                     client = client,
@@ -275,7 +283,7 @@ namespace Tests.GeoClusterTests
 
             ValidateClusterRaceResults(results, grains);
 
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         private volatile int threadsDone;
@@ -349,7 +357,7 @@ namespace Tests.GeoClusterTests
         // so they both activate an instance
         // and one of them deactivated once communication is unblocked
 
-        public async Task ConflictResolution()
+        private async Task ConflictResolution()
         {
             int offset = random.Next();
 
@@ -503,11 +511,11 @@ namespace Tests.GeoClusterTests
         private List<GrainId> GetGrainsInClusterWithStatus(string clusterId, GrainDirectoryEntryStatus? status = null)
         {
             List<GrainId> grains = new List<GrainId>();
-            var silos = Clusters[clusterId].Silos;
+            var silos = Clusters[clusterId].Cluster.GetActiveSilos();
             int totalSoFar = 0;
             foreach (var silo in silos)
             {
-                var dir = silo.Silo.TestHook.GetDirectoryForTypeNamesContaining("ClusterTestGrain");
+                var dir = silo.AppDomainTestHook.GetDirectoryForTypeNamesContaining("ClusterTestGrain");
                 foreach (var grainKeyValue in dir)
                 {
                     GrainId grainId = grainKeyValue.Key;
@@ -527,7 +535,7 @@ namespace Tests.GeoClusterTests
                         grains.Add(grainId);
                     }
                 }
-                WriteLog("Returning: Silo {0} State = {1} Count = {2}", silo.Silo.SiloAddress, status.HasValue ? status.Value.ToString() : "ANY", (grains.Count - totalSoFar));
+                WriteLog("Returning: Silo {0} State = {1} Count = {2}", silo.SiloAddress, status.HasValue ? status.Value.ToString() : "ANY", (grains.Count - totalSoFar));
                 totalSoFar = grains.Count;
             }
             WriteLog("Returning: Cluster {0} State = {1} Count = {2}", clusterId, status.HasValue ? status.Value.ToString() : "ANY", grains.Count);
@@ -543,7 +551,7 @@ namespace Tests.GeoClusterTests
             foreach (var kvp in Clusters)
                 foreach (var silo in kvp.Value.Silos)
                 {
-                    var dir = silo.Silo.TestHook.GetDirectoryForTypeNamesContaining("ClusterTestGrain");
+                    var dir = silo.AppDomainTestHook.GetDirectoryForTypeNamesContaining("ClusterTestGrain");
 
                     foreach (var grainKeyValue in dir)
                     {

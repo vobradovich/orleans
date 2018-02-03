@@ -1,9 +1,11 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Reflection;
+using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 using Orleans.Runtime.Host;
 using Orleans.TestingHost;
+using Orleans.TestingHost.Utils;
 using Xunit;
 
 namespace Tester
@@ -13,7 +15,7 @@ namespace Tester
         /// <summary>
         /// Tests that a silo host can be successfully started after a prior initialization failure.
         /// </summary>
-        [Fact]
+        [Fact, TestCategory("Functional")]
         public void SiloInitializationIsRetryableTest()
         {
             var appDomain = CreateAppDomain();
@@ -24,7 +26,7 @@ namespace Tester
 
             try
             {
-                var config = new TestClusterOptions(1).ClusterConfiguration;
+                var config = ClusterConfiguration.LocalhostPrimarySilo();
                 var originalLivenessType = config.Globals.LivenessType;
                 var originalMembershipAssembly = config.Globals.MembershipTableAssembly;
 
@@ -32,7 +34,7 @@ namespace Tester
                 // Try initializing the cluster, verify that it fails.
                 config.Globals.LivenessType = GlobalConfiguration.LivenessProviderType.Custom;
                 config.Globals.MembershipTableAssembly = "NonExistentAssembly.jpg";
-
+                
                 var siloHost = CreateSiloHost(appDomain, config);
                 siloHost.InitializeOrleansSilo();
 
@@ -72,10 +74,10 @@ namespace Tester
 
         private static SiloHost CreateSiloHost(AppDomain appDomain, ClusterConfiguration clusterConfig)
         {
-            var args = new object[] { nameof(SiloInitializationIsRetryableTest), clusterConfig };
+            var args = new object[] { nameof(SiloInitializationIsRetryableTest), clusterConfig};
 
             return (SiloHost)appDomain.CreateInstanceFromAndUnwrap(
-                "OrleansRuntime.dll",
+                "Orleans.Runtime.Legacy.dll",
                 typeof(SiloHost).FullName,
                 false,
                 BindingFlags.Default,

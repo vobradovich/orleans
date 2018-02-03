@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Orleans;
@@ -9,16 +9,21 @@ using Orleans.Streams;
 using Orleans.TestingHost;
 using Tester;
 using Tester.StreamingTests;
+using TestExtensions;
 using TestGrains;
 using UnitTests.Grains;
-using UnitTests.Tester;
 using Xunit;
 
 namespace UnitTests.StreamingTests
 {
     public class GeneratedImplicitSubscriptionStreamRecoveryTests : OrleansTestingBase, IClassFixture<GeneratedImplicitSubscriptionStreamRecoveryTests.Fixture>
     {
-        private class Fixture : BaseTestClusterFixture
+        private static readonly string StreamProviderTypeName = typeof(GeneratorStreamProvider).FullName;
+        private readonly Fixture fixture;
+        private readonly ImplicitSubscritionRecoverableStreamTestRunner runner;
+
+
+        public class Fixture : BaseTestClusterFixture
         {
             public const string StreamProviderName = GeneratedStreamTestConstants.StreamProviderName;
 
@@ -27,43 +32,40 @@ namespace UnitTests.StreamingTests
                 TotalQueueCount = 4,
             };
 
-            protected override TestCluster CreateTestCluster()
+            protected override void ConfigureTestCluster(TestClusterBuilder builder)
             {
-                var options = new TestClusterOptions(2);
-                options.ClusterConfiguration.AddMemoryStorageProvider("MemoryStore");
-                options.ClusterConfiguration.AddMemoryStorageProvider("Default");
-                var settings = new Dictionary<string, string>();
-                // get initial settings from configs
-                AdapterConfig.WriteProperties(settings);
+                builder.ConfigureLegacyConfiguration(legacy =>
+                {
+                    legacy.ClusterConfiguration.AddMemoryStorageProvider("MemoryStore");
+                    legacy.ClusterConfiguration.AddMemoryStorageProvider("Default");
+                    var settings = new Dictionary<string, string>();
+                    // get initial settings from configs
+                    AdapterConfig.WriteProperties(settings);
 
-                // add queue balancer setting
-                settings.Add(PersistentStreamProviderConfig.QUEUE_BALANCER_TYPE, StreamQueueBalancerType.DynamicClusterConfigDeploymentBalancer.ToString());
+                    // add queue balancer setting
+                    settings.Add(PersistentStreamProviderConfig.QUEUE_BALANCER_TYPE, StreamQueueBalancerType.DynamicClusterConfigDeploymentBalancer.AssemblyQualifiedName);
 
-                // add pub/sub settting
-                settings.Add(PersistentStreamProviderConfig.STREAM_PUBSUB_TYPE, StreamPubSubType.ImplicitOnly.ToString());
+                    // add pub/sub settting
+                    settings.Add(PersistentStreamProviderConfig.STREAM_PUBSUB_TYPE, StreamPubSubType.ImplicitOnly.ToString());
 
-                // register stream provider
-                options.ClusterConfiguration.Globals.RegisterStreamProvider<GeneratorStreamProvider>(StreamProviderName, settings);
-
-                return new TestCluster(options);
+                    // register stream provider
+                    legacy.ClusterConfiguration.Globals.RegisterStreamProvider<GeneratorStreamProvider>(StreamProviderName, settings);
+                });
             }
         }
 
-        private static readonly string StreamProviderTypeName = typeof(GeneratorStreamProvider).FullName;
-
-        private ImplicitSubscritionRecoverableStreamTestRunner runner;
-
-        public GeneratedImplicitSubscriptionStreamRecoveryTests()
+        public GeneratedImplicitSubscriptionStreamRecoveryTests(Fixture fixture)
         {
-            runner = new ImplicitSubscritionRecoverableStreamTestRunner(
-                GrainClient.GrainFactory,
+            this.fixture = fixture;
+            this.runner = new ImplicitSubscritionRecoverableStreamTestRunner(
+                this.fixture.GrainFactory,
                 Fixture.StreamProviderName);
         }
 
         [Fact, TestCategory("SlowBVT"), TestCategory("Functional"), TestCategory("Streaming")]
         public async Task Recoverable100EventStreamsWithTransientErrorsTest()
         {
-            logger.Info("************************ Recoverable100EventStreamsWithTransientErrorsTest *********************************");
+            this.fixture.Logger.Info("************************ Recoverable100EventStreamsWithTransientErrorsTest *********************************");
             await runner.Recoverable100EventStreamsWithTransientErrors(GenerateEvents,
                 ImplicitSubscription_TransientError_RecoverableStream_CollectorGrain.StreamNamespace,
                 Fixture.AdapterConfig.TotalQueueCount,
@@ -73,7 +75,7 @@ namespace UnitTests.StreamingTests
         [Fact, TestCategory("SlowBVT"), TestCategory("Functional"), TestCategory("Streaming")]
         public async Task Recoverable100EventStreamsWith1NonTransientErrorTest()
         {
-            logger.Info("************************ Recoverable100EventStreamsWith1NonTransientErrorTest *********************************");
+            this.fixture.Logger.Info("************************ Recoverable100EventStreamsWith1NonTransientErrorTest *********************************");
             await runner.Recoverable100EventStreamsWith1NonTransientError(GenerateEvents,
                 ImplicitSubscription_NonTransientError_RecoverableStream_CollectorGrain.StreamNamespace,
                 Fixture.AdapterConfig.TotalQueueCount,
@@ -88,7 +90,7 @@ namespace UnitTests.StreamingTests
                 EventsInStream = eventsInStream
             };
 
-            var mgmt = GrainClient.GrainFactory.GetGrain<IManagementGrain>(0);
+            var mgmt = this.fixture.GrainFactory.GetGrain<IManagementGrain>(0);
             object[] results = await mgmt.SendControlCommandToProvider(StreamProviderTypeName, Fixture.StreamProviderName, (int)StreamGeneratorCommand.Configure, generatorConfig);
             Assert.Equal(2, results.Length);
             bool[] bResults = results.Cast<bool>().ToArray();

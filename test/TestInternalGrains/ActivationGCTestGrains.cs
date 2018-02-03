@@ -11,7 +11,7 @@ namespace UnitTests.Grains
     {
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
     }
 
@@ -19,17 +19,23 @@ namespace UnitTests.Grains
     {
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
     }
 
-    public class BusyActivationGcTestGrain1: Grain, IBusyActivationGcTestGrain1
+    internal class BusyActivationGcTestGrain1: Grain, IBusyActivationGcTestGrain1
     {
+        private readonly Catalog catalog;
         private int burstCount = 0;
+
+        public BusyActivationGcTestGrain1(Catalog catalog)
+        {
+            this.catalog = catalog;
+        }
 
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task Delay(TimeSpan dt)
@@ -50,14 +56,14 @@ namespace UnitTests.Grains
             }
 
             burstCount = count;
-            Silo.CurrentSilo.TestHook.Debug_OnDecideToCollectActivation = OnCollectActivation;
-            return TaskDone.Done;
+            this.catalog.ActivationCollector.Debug_OnDecideToCollectActivation = OnCollectActivation;
+            return Task.CompletedTask;
         }
 
         private void OnCollectActivation(GrainId grainId)
         {
-            int other = grainId.GetTypeCode();
-            int self = Data.Address.Grain.GetTypeCode();
+            int other = grainId.TypeCode;
+            int self = Data.Address.Grain.TypeCode;
             if (other == self)
             {
                 IBusyActivationGcTestGrain1 g = GrainFactory.GetGrain<IBusyActivationGcTestGrain1>(grainId.GetPrimaryKey());
@@ -73,7 +79,7 @@ namespace UnitTests.Grains
     {
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
     }
 
@@ -82,7 +88,7 @@ namespace UnitTests.Grains
     {
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task Delay(TimeSpan dt)

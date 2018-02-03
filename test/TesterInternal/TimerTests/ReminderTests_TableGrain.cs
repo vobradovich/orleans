@@ -1,12 +1,14 @@
-﻿//#define USE_SQL_SERVER
+//#define USE_SQL_SERVER
 
 using System;
 using System.Threading.Tasks;
 using Orleans;
 using Orleans.Runtime.Configuration;
 using Orleans.TestingHost;
+using TestExtensions;
 using UnitTests.GrainInterfaces;
 using Xunit;
+using Tester;
 
 // ReSharper disable InconsistentNaming
 // ReSharper disable UnusedVariable
@@ -15,15 +17,11 @@ namespace UnitTests.TimerTests
 {
     public class ReminderTests_TableGrain : ReminderTests_Base, IClassFixture<ReminderTests_TableGrain.Fixture>
     {
-        public class Fixture : BaseClusterFixture
+        public class Fixture : BaseTestClusterFixture
         {
-            protected override TestingSiloHost CreateClusterHost()
+            protected override void ConfigureTestCluster(TestClusterBuilder builder)
             {
-                return new TestingSiloHost(new TestingSiloOptions
-                {
-                    ReminderServiceType = GlobalConfiguration.ReminderServiceProviderType.ReminderTableGrain,
-                    LivenessType = GlobalConfiguration.LivenessProviderType.MembershipTableGrain, // Seperate testing of Reminders storage from membership storage
-                });
+                builder.ConfigureLegacyConfiguration();
             }
         }
 
@@ -31,7 +29,7 @@ namespace UnitTests.TimerTests
         {
             // ReminderTable.Clear() cannot be called from a non-Orleans thread,
             // so we must proxy the call through a grain.
-            var controlProxy = GrainClient.GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
+            var controlProxy = this.GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
             controlProxy.EraseReminderTable().WaitWithThrow(TestConstants.InitTimeout);
         }
 
@@ -53,7 +51,7 @@ namespace UnitTests.TimerTests
         public async Task Rem_Grain_MultipleReminders()
         {
             //log.Info(TestContext.TestName);
-            IReminderTestGrain2 grain = GrainClient.GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
+            IReminderTestGrain2 grain = this.GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
             await PerGrainMultiReminderTest(grain);
         }
 

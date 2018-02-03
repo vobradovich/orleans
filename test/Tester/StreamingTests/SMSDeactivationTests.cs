@@ -4,8 +4,8 @@ using Orleans;
 using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 using Orleans.TestingHost;
+using TestExtensions;
 using UnitTests.Grains;
-using UnitTests.Tester;
 using Xunit;
 
 namespace UnitTests.StreamingTests
@@ -14,25 +14,25 @@ namespace UnitTests.StreamingTests
     {
         private const string SMSStreamProviderName = "SMSProvider";
         private const string StreamNamespace = "SMSDeactivationTestsNamespace";
-        private DeactivationTestRunner runner;
+        private readonly DeactivationTestRunner runner;
 
         public SMSDeactivationTests()
         {
-            runner = new DeactivationTestRunner(SMSStreamProviderName, GrainClient.Logger);
+            runner = new DeactivationTestRunner(SMSStreamProviderName, this.Client);
         }
 
-        public override TestCluster CreateTestCluster()
+        protected override void ConfigureTestCluster(TestClusterBuilder builder)
         {
-            var options = new TestClusterOptions();
-            options.ClusterConfiguration.Globals.Application.SetDefaultCollectionAgeLimit(TimeSpan.FromMinutes(1));
-            options.ClusterConfiguration.Globals.Application.SetCollectionAgeLimit(typeof(MultipleSubscriptionConsumerGrain), TimeSpan.FromHours(2));
-            options.ClusterConfiguration.Globals.ResponseTimeout = TimeSpan.FromMinutes(30);
+            builder.ConfigureLegacyConfiguration(legacy =>
+            {
+                legacy.ClusterConfiguration.Globals.Application.SetDefaultCollectionAgeLimit(TimeSpan.FromMinutes(1));
+                legacy.ClusterConfiguration.Globals.Application.SetCollectionAgeLimit(typeof(MultipleSubscriptionConsumerGrain), TimeSpan.FromHours(2));
+                legacy.ClusterConfiguration.Globals.ResponseTimeout = TimeSpan.FromMinutes(30);
 
-            options.ClusterConfiguration.AddMemoryStorageProvider("PubSubStore");
-            options.ClusterConfiguration.AddSimpleMessageStreamProvider(StreamTestsConstants.SMS_STREAM_PROVIDER_NAME);
-            options.ClientConfiguration.AddSimpleMessageStreamProvider(StreamTestsConstants.SMS_STREAM_PROVIDER_NAME);
-
-            return new TestCluster(options);
+                legacy.ClusterConfiguration.AddMemoryStorageProvider("PubSubStore");
+                legacy.ClusterConfiguration.AddSimpleMessageStreamProvider(StreamTestsConstants.SMS_STREAM_PROVIDER_NAME);
+                legacy.ClientConfiguration.AddSimpleMessageStreamProvider(StreamTestsConstants.SMS_STREAM_PROVIDER_NAME);
+            });
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Streaming")]

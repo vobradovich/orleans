@@ -1,18 +1,21 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Security.Principal;
+using Microsoft.Extensions.Logging;
+using Orleans.ApplicationParts;
+using Orleans.Hosting;
+using Orleans.Logging;
+using Orleans.Metadata;
 using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
-
+using OrleansTelemetryConsumers.Counters;
 
 namespace Orleans.Counter.Control
 {
-    using System.Collections.Generic;
-    using Orleans.Serialization;
-    using OrleansTelemetryConsumers.Counters;
-
     /// <summary>
     /// Control Orleans Counters - Register or Unregister the Orleans counter set
     /// </summary>
@@ -23,16 +26,26 @@ namespace Orleans.Counter.Control
         public bool NeedRunAsAdministrator { get; private set; }
         public bool IsRunningAsAdministrator { get; private set; }
         public bool PauseAtEnd { get; private set; }
-
+        private readonly ILogger logger;
         private static OrleansPerfCounterTelemetryConsumer perfCounterConsumer;
 
-        public CounterControl()
+        public CounterControl(ILoggerFactory loggerFactory)
         {
             // Check user is Administrator and has granted UAC elevation permission to run this app
             var userIdent = WindowsIdentity.GetCurrent();
             var userPrincipal = new WindowsPrincipal(userIdent);
             IsRunningAsAdministrator = userPrincipal.IsInRole(WindowsBuiltInRole.Administrator);
-            perfCounterConsumer = new OrleansPerfCounterTelemetryConsumer();
+
+            var parts = new ApplicationPartManager();
+            parts.AddFromAppDomain()
+                .AddFromApplicationBaseDirectory()
+                .AddFeatureProvider(new AssemblyAttributeFeatureProvider<GrainClassFeature>());
+            var grainClassFeature = parts.CreateAndPopulateFeature<GrainClassFeature>();
+
+            CrashUtils.GrainTypes = grainClassFeature.Classes.Select(metadata => TypeUtils.GetFullName(metadata.ClassType)).ToList();
+
+            perfCounterConsumer = new OrleansPerfCounterTelemetryConsumer(loggerFactory);
+            this.logger = loggerFactory.CreateLogger<CounterControl>();
         }
 
         public void PrintUsage()
@@ -108,10 +121,6 @@ namespace Orleans.Counter.Control
                 return 1;
             }
 
-            SerializationManager.InitializeForTesting();
-
-            InitConsoleLogging();
-
             try
             {
                 if (Unregister)
@@ -140,17 +149,21 @@ namespace Orleans.Counter.Control
         }
 
         /// <summary>
-        /// Initialize log infrastrtucture for Orleans runtime sub-components
+        /// Initialize log infrastructure for Orleans runtime sub-components
         /// </summary>
-        private static void InitConsoleLogging()
+        internal static ILoggerFactory InitDefaultLogging()
         {
             Trace.Listeners.Clear();
-            var cfg = new NodeConfiguration { TraceFilePattern = null, TraceToConsole = false };
-            LogManager.Initialize(cfg);
+            return CreateDefaultLoggerFactory("CounterControl.log");
+        }
 
-            //TODO: Move it to use the APM APIs
-            //var logWriter = new LogWriterToConsole(true, true); // Use compact console output & no timestamps / log message metadata
-            //LogManager.LogConsumers.Add(logWriter);
+        private static ILoggerFactory CreateDefaultLoggerFactory(string filePath)
+        {
+            var factory = new LoggerFactory();
+            factory.AddProvider(new FileLoggerProvider(filePath));
+            if (ConsoleText.IsConsoleAvailable)
+                factory.AddConsole();
+            return factory;
         }
 
         /// <summary>
@@ -158,11 +171,11 @@ namespace Orleans.Counter.Control
         /// </summary>
         /// <param name="useBruteForce">Use brute force, if necessary</param>
         /// <remarks>Note: Program needs to be running as Administrator to be able to register Windows perf counters.</remarks>
-        private static void RegisterWindowsPerfCounters(bool useBruteForce)
+        private void RegisterWindowsPerfCounters(bool useBruteForce)
         {
             try
             {
-                if (OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable())
+                if (OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable(this.logger))
                 {
                     if (!useBruteForce)
                     {
@@ -174,16 +187,10 @@ namespace Orleans.Counter.Control
                     UnregisterWindowsPerfCounters(true);
                 }
 
-                if (GrainTypeManager.Instance == null)
-                {
-                    var loader = new SiloAssemblyLoader(new Dictionary<string, SearchOption>());
-                    var typeManager = new GrainTypeManager(false, null, loader); // We shouldn't need GrainFactory in this case
-                    GrainTypeManager.Instance.Start(false);
-                }
                 // Register perf counters
                 perfCounterConsumer.InstallCounters();
 
-                if (OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable())
+                if (OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable(this.logger))
                     ConsoleText.WriteStatus("Orleans counters registered successfully");
                 else
                     ConsoleText.WriteError("Orleans counters are NOT registered");
@@ -200,9 +207,9 @@ namespace Orleans.Counter.Control
         /// </summary>
         /// <param name="useBruteForce">Use brute force, if necessary</param>
         /// <remarks>Note: Program needs to be running as Administrator to be able to unregister Windows perf counters.</remarks>
-        private static void UnregisterWindowsPerfCounters(bool useBruteForce)
+        private void UnregisterWindowsPerfCounters(bool useBruteForce)
         {
-            if (!OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable())
+            if (!OrleansPerfCounterTelemetryConsumer.AreWindowsPerfCountersAvailable(this.logger))
             {
                 ConsoleText.WriteStatus("Orleans counters are already unregistered");
                 return;

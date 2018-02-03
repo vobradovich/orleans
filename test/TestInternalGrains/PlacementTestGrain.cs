@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Placement;
@@ -13,6 +14,13 @@ namespace UnitTests.Grains
 {
     internal abstract class PlacementTestGrainBase : Grain
     {
+        private readonly ISiloPerformanceMetrics siloPerformanceMetrics;
+
+        public PlacementTestGrainBase(ISiloPerformanceMetrics siloPerformanceMetrics)
+        {
+            this.siloPerformanceMetrics = siloPerformanceMetrics;
+        }
+
         public Task<IPEndPoint> GetEndpoint()
         {
             return Task.FromResult(Data.Address.Silo.Endpoint);
@@ -30,7 +38,7 @@ namespace UnitTests.Grains
 
         public Task Nop()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task StartLocalGrains(List<Guid> keys)
@@ -65,7 +73,7 @@ namespace UnitTests.Grains
         {
             // force the latched statistics to propigate throughout the cluster.
             IManagementGrain mgmtGrain =
-                grainFactory.GetGrain<IManagementGrain>(RuntimeInterfaceConstants.SYSTEM_MANAGEMENT_ID);
+                grainFactory.GetGrain<IManagementGrain>(0);
 
             var hosts = await mgmtGrain.GetHosts(true);
             var keys = hosts.Select(kvp => kvp.Key).ToArray();
@@ -74,25 +82,25 @@ namespace UnitTests.Grains
 
         public Task LatchOverloaded()
         {
-            Silo.CurrentSilo.Metrics.LatchIsOverload(true);
+            this.siloPerformanceMetrics.LatchIsOverload(true);
             return PropigateStatisticsToCluster(GrainFactory);
         }
 
         public Task UnlatchOverloaded()
         {
-            Silo.CurrentSilo.Metrics.UnlatchIsOverloaded();
+            this.siloPerformanceMetrics.UnlatchIsOverloaded();
             return PropigateStatisticsToCluster(GrainFactory);
         }
 
         public Task LatchCpuUsage(float value)
         {
-            Silo.CurrentSilo.Metrics.LatchCpuUsage(value);
+            this.siloPerformanceMetrics.LatchCpuUsage(value);
             return PropigateStatisticsToCluster(GrainFactory);
         }
 
         public Task UnlatchCpuUsage()
         {
-            Silo.CurrentSilo.Metrics.UnlatchCpuUsage();
+            this.siloPerformanceMetrics.UnlatchCpuUsage();
             return PropigateStatisticsToCluster(GrainFactory);
         }
 
@@ -104,25 +112,49 @@ namespace UnitTests.Grains
     }
 
     [RandomPlacement]
-    internal class RandomPlacementTestGrain : 
+    internal class RandomPlacementTestGrain :
         PlacementTestGrainBase, IRandomPlacementTestGrain
-    {}
+    {
+        public RandomPlacementTestGrain(ISiloPerformanceMetrics siloPerformanceMetrics) : base(siloPerformanceMetrics)
+        {
+        }
+    }
 
     [PreferLocalPlacement]
     internal class PreferLocalPlacementTestGrain :
        PlacementTestGrainBase, IPreferLocalPlacementTestGrain
-    { }
+    {
+        public PreferLocalPlacementTestGrain(ISiloPerformanceMetrics siloPerformanceMetrics) : base(siloPerformanceMetrics)
+        {
+        }
+    }
 
     [StatelessWorker]
-    internal class LocalPlacementTestGrain : 
+    internal class LocalPlacementTestGrain :
         PlacementTestGrainBase, ILocalPlacementTestGrain
-    {}
+    {
+        public LocalPlacementTestGrain(ISiloPerformanceMetrics siloPerformanceMetrics) : base(siloPerformanceMetrics)
+        {
+        }
+    }
 
     [ActivationCountBasedPlacement]
-    internal class ActivationCountBasedPlacementTestGrain : 
+    internal class ActivationCountBasedPlacementTestGrain :
         PlacementTestGrainBase, IActivationCountBasedPlacementTestGrain
-    {}
+    {
+        public ActivationCountBasedPlacementTestGrain(ISiloPerformanceMetrics siloPerformanceMetrics) : base(siloPerformanceMetrics)
+        {
+        }
+    }
 
+    internal class DefaultPlacementGrain : Grain, IDefaultPlacementGrain
+    {
+        public Task<PlacementStrategy> GetDefaultPlacement()
+        {
+            var defaultStrategy = this.ServiceProvider.GetRequiredService<PlacementStrategy>();
+            return Task.FromResult(defaultStrategy);
+        }
+    }
 
     //----------------------------------------------------------//
     // Grains for LocalContent grain case, when grain is activated on every silo by bootstrap provider.
@@ -136,7 +168,7 @@ namespace UnitTests.Grains
         
         public override Task OnActivateAsync()
         {
-            this.logger = GetLogger();
+            this.logger = this.GetLogger();
             logger.Info("OnActivateAsync");
             DelayDeactivation(TimeSpan.MaxValue);   // make sure this activation is not collected.
             cachedContent = RuntimeIdentity;        // store your silo identity as a local cached content in this grain.
@@ -162,7 +194,7 @@ namespace UnitTests.Grains
 
         public override Task OnActivateAsync()
         {
-            this.logger = GetLogger();
+            this.logger = this.GetLogger();
             logger.Info("OnActivateAsync");
             return base.OnActivateAsync();
         }

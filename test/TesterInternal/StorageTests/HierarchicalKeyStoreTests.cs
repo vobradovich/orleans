@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -6,24 +6,18 @@ using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 using Orleans.Storage;
 using Xunit;
+using Orleans.Hosting;
 
 namespace UnitTests.StorageTests
 {
     public class HierarchicalKeyStoreTests : IClassFixture<HierarchicalKeyStoreTests.Fixture>
     {
-        public class Fixture : IDisposable
+        public class Fixture
         {
             public Fixture()
             {
-                BufferPool.InitGlobalBufferPool(new MessagingConfiguration(false));
-                ClientConfiguration cfg = ClientConfiguration.StandardLoad();
-                LogManager.Initialize(cfg);
-                LocalDataStoreInstance.LocalDataStore = null;
-            }
-
-            public void Dispose()
-            {
-                LocalDataStoreInstance.LocalDataStore = null;
+                BufferPool.InitGlobalBufferPool(new SiloMessagingOptions());
+                ClientConfiguration cfg = ClientConfiguration.LoadFromFile("ClientConfigurationForTesting.xml");
             }
         }
 

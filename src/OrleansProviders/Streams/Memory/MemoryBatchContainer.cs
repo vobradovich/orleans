@@ -2,50 +2,66 @@
 using System.Collections.Generic;
 using System.Linq;
 using Orleans.Providers.Streams.Common;
+using Orleans.Runtime;
+using Orleans.Serialization;
 using Orleans.Streams;
 
-namespace Orleans.Providers.Streams.Memory
+namespace Orleans.Providers
 {
     [Serializable]
-    internal class MemoryBatchContainer : IBatchContainer
+    internal class MemoryBatchContainer<TSerializer> : IBatchContainer, IOnDeserialized
+        where TSerializer : class, IMemoryMessageBodySerializer
     {
-        private readonly EventSequenceToken realToken;
-        public Guid StreamGuid => EventData.StreamGuid;
-        public string StreamNamespace => EventData.StreamNamespace;
-        public StreamSequenceToken SequenceToken => realToken;
-        public MemoryEventData EventData { get; set; }
-        public long SequenceNumber{ get { return realToken.SequenceNumber; } }
+        [NonSerialized]
+        private TSerializer serializer;
 
-        public MemoryBatchContainer(MemoryEventData eventData, long sequenceId)
+        private readonly EventSequenceToken realToken;
+
+        public Guid StreamGuid => MessageData.StreamGuid;
+        public string StreamNamespace => MessageData.StreamNamespace;
+        public StreamSequenceToken SequenceToken => realToken;
+        public MemoryMessageData MessageData { get; set; }
+        public long SequenceNumber => realToken.SequenceNumber;
+
+        // Payload is local cache of deserialized payloadBytes.  Should never be serialized as part of batch container.  During batch container serialization raw payloadBytes will always be used.
+        [NonSerialized] private MemoryMessageBody payload;
+         
+        private MemoryMessageBody Payload()
         {
-            this.EventData = eventData;
-            this.realToken = new EventSequenceToken(sequenceId);
+            return payload ?? (payload = serializer.Deserialize(MessageData.Payload));
+        }
+        
+        public MemoryBatchContainer(MemoryMessageData messageData, TSerializer serializer)
+        {
+            this.serializer = serializer;
+            MessageData = messageData;
+            realToken = new EventSequenceToken(messageData.SequenceNumber);
         }
 
         public IEnumerable<Tuple<T, StreamSequenceToken>> GetEvents<T>()
         {
-            return EventData.Events.Cast<T>().Select((e, i) => Tuple.Create<T, StreamSequenceToken>(e, realToken.CreateSequenceTokenForEvent(i)));
+            return Payload().Events.Cast<T>().Select((e, i) => Tuple.Create<T, StreamSequenceToken>(e, realToken.CreateSequenceTokenForEvent(i)));
         }
 
         public bool ImportRequestContext()
         {
+            var context = Payload().RequestContext;
+            if (context != null)
+            {
+                RequestContextExtensions.Import(context);
+                return true;
+            }
             return false;
         }
 
         public bool ShouldDeliver(IStreamIdentity stream, object filterData, StreamFilterPredicate shouldReceiveFunc)
         {
-            return EventData?.Events?.Count > 0;
+            return true;
         }
 
-        internal static MemoryEventData ToMemoryEventData<T>(Guid streamGuid, String streamNamespace, IEnumerable<T> events, Dictionary<string, object> requestContext)
+        void IOnDeserialized.OnDeserialized(ISerializerContext context)
         {
-            MemoryEventData eventData = new MemoryEventData(streamGuid, streamNamespace, events.Cast<object>().ToList(), requestContext);
-            return eventData;
-        }
-
-        internal static MemoryBatchContainer FromMemoryEventData<T>(MemoryEventData eventData, long sequenceId)
-        {
-            return new MemoryBatchContainer(eventData, sequenceId);
+            this.serializer = MemoryMessageBodySerializerFactory<TSerializer>.GetOrCreateSerializer(context.ServiceProvider);
         }
     }
 }

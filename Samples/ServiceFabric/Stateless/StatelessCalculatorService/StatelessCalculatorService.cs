@@ -1,15 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Fabric;
-using System.Linq;
-using System.Net;
-using System.Net.Sockets;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Grains;
+using Microsoft.Extensions.Logging;
 using Microsoft.ServiceFabric.Services.Communication.Runtime;
 using Microsoft.ServiceFabric.Services.Runtime;
-using Microsoft.Orleans.ServiceFabric;
+using Orleans.Clustering.ServiceFabric;
+using Orleans;
+using Orleans.Hosting;
+using Orleans.Hosting.ServiceFabric;
 using Orleans.Runtime.Configuration;
 
 namespace StatelessCalculatorService
@@ -21,7 +22,8 @@ namespace StatelessCalculatorService
     {
         public StatelessCalculatorService(StatelessServiceContext context)
             : base(context)
-        { }
+        {
+        }
 
         /// <summary>
         /// Optional override to create listeners (e.g., TCP, HTTP) for this service replica to handle client or user requests.
@@ -29,7 +31,39 @@ namespace StatelessCalculatorService
         /// <returns>A collection of listeners.</returns>
         protected override IEnumerable<ServiceInstanceListener> CreateServiceInstanceListeners()
         {
-            return new[] { OrleansServiceListener.CreateStateless(this.GetClusterConfiguration()) };
+            // Listeners can be opened and closed multiple times over the lifetime of a service instance.
+            // A new Orleans silo will be both created and initialized each time the listener is opened and will be shutdown 
+            // when the listener is closed.
+            var listener = OrleansServiceListener.CreateStateless(
+                (serviceContext, builder) =>
+                {
+                    // Optional: use Service Fabric for cluster membership.
+                    builder.UseServiceFabricClustering(serviceContext);
+                    
+                    // Optional: configure logging.
+                    builder.ConfigureLogging(logging => logging.AddDebug());
+
+                    var config = new ClusterConfiguration();
+                    config.Globals.RegisterBootstrapProvider<BootstrapProvider>("poke_grains");
+                    config.Globals.ReminderServiceType = GlobalConfiguration.ReminderServiceProviderType.ReminderTableGrain;
+
+                    // Service Fabric manages port allocations, so update the configuration using those ports.
+                    config.Defaults.ConfigureServiceFabricSiloEndpoints(serviceContext);
+
+                    // Tell Orleans to use this configuration.
+                    builder.UseConfiguration(config);
+
+                    // Add your application assemblies.
+                    builder.ConfigureApplicationParts(parts =>
+                    {
+                        parts.AddApplicationPart(typeof(CalculatorGrain).Assembly).WithReferences();
+                        
+                        // Alternative: add all loadable assemblies in the current base path (see AppDomain.BaseDirectory).
+                        parts.AddFromApplicationBaseDirectory();
+                    });
+                });
+
+            return new[] { listener };
         }
 
         /// <summary>
@@ -40,27 +74,12 @@ namespace StatelessCalculatorService
         {
             // TODO: Replace the following sample code with your own logic 
             //       or remove this RunAsync override if it's not needed in your service.
-
-            long iterations = 0;
-
+            
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                ServiceEventSource.Current.ServiceMessage(this, "Working-{0}", ++iterations);
-
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
             }
-        }
-
-        public ClusterConfiguration GetClusterConfiguration()
-        {
-            var config = new ClusterConfiguration();
-            config.Globals.DeploymentId = Regex.Replace(this.Context.ServiceName.PathAndQuery.Trim('/'), "[^a-zA-Z0-9_]", "_");
-            config.Globals.ReminderServiceType = GlobalConfiguration.ReminderServiceProviderType.ReminderTableGrain;
-            config.Globals.LivenessType = GlobalConfiguration.LivenessProviderType.AzureTable;
-            config.Globals.DataConnectionString = "UseDevelopmentStorage=true";
-            return config;
         }
     }
 }

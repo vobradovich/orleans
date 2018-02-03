@@ -10,7 +10,7 @@ namespace StatelessCalculatorService
         /// <summary>
         /// This is the entry point of the service host process.
         /// </summary>
-        private static void Main()
+        public static void Main()
         {
             try
             {
@@ -18,10 +18,10 @@ namespace StatelessCalculatorService
                 // Registering a service maps a service type name to a .NET type.
                 // When Service Fabric creates an instance of this service type,
                 // an instance of the class is created in this host process.
+                ServiceRuntime.RegisterServiceAsync(
+                    "StatelessCalculatorServiceType",
+                    context => new StatelessCalculatorService(context)).Wait();
 
-                ServiceRuntime.RegisterServiceAsync("StatelessCalculatorServiceType",
-                    context => new StatelessCalculatorService(context)).GetAwaiter().GetResult();
-                
                 ServiceEventSource.Current.ServiceTypeRegistered(Process.GetCurrentProcess().Id, typeof(StatelessCalculatorService).Name);
 
                 // Prevents this host process from terminating so services keep running.

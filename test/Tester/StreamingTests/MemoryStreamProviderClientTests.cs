@@ -1,14 +1,14 @@
-﻿using System;
+
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Orleans;
+using Orleans.Providers;
 using Orleans.Providers.Streams.Generator;
-using Orleans.Providers.Streams.Memory;
 using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
 using Orleans.TestingHost;
-using TestGrains;
-using UnitTests.Tester;
+using TestExtensions;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -19,36 +19,36 @@ namespace Tester.StreamingTests
         public class Fixture : BaseTestClusterFixture
         {
             public const string StreamProviderName = nameof(MemoryStreamProvider);
-            public const string StreamNamespace = GeneratedEventCollectorGrain.StreamNamespace;
+            public const string StreamNamespace = "StreamNamespace";
 
-            public readonly static SimpleGeneratorConfig GeneratorConfig = new SimpleGeneratorConfig
+            public static readonly SimpleGeneratorConfig GeneratorConfig = new SimpleGeneratorConfig
             {
                 StreamNamespace = StreamNamespace,
                 EventsInStream = 100
             };
 
-            public readonly static MemoryAdapterConfig AdapterConfig = new MemoryAdapterConfig(StreamProviderName);
+            public static readonly MemoryAdapterConfig AdapterConfig = new MemoryAdapterConfig(StreamProviderName);
 
-            protected override TestCluster CreateTestCluster()
+            protected override void ConfigureTestCluster(TestClusterBuilder builder)
             {
-                GrainClient.Uninitialize();
-                var options = new TestClusterOptions(1);
-                AdjustConfig(options.ClusterConfiguration);
-                AdjustConfig(options.ClientConfiguration);
-                return new TestCluster(options);
+                builder.ConfigureLegacyConfiguration(legacy =>
+                {
+                    AdjustConfig(legacy.ClusterConfiguration);
+                    AdjustConfig(legacy.ClientConfiguration);
+                });
             }
 
             private static void AdjustConfig(ClusterConfiguration config)
             {
                 // register stream provider
                 config.AddMemoryStorageProvider("PubSubStore");
-                config.Globals.RegisterStreamProvider<MemoryStreamProvider>(Fixture.StreamProviderName, BuildProviderSettings());
+                config.Globals.RegisterStreamProvider<MemoryStreamProvider>(StreamProviderName, BuildProviderSettings());
                 config.Globals.ClientDropTimeout = TimeSpan.FromSeconds(5);
             }
 
             private static void AdjustConfig(ClientConfiguration config)
             {
-                config.RegisterStreamProvider<MemoryStreamProvider>(Fixture.StreamProviderName, BuildProviderSettings());
+                config.RegisterStreamProvider<MemoryStreamProvider>(StreamProviderName, BuildProviderSettings());
             }
 
             private static Dictionary<string, string> BuildProviderSettings()
@@ -64,22 +64,25 @@ namespace Tester.StreamingTests
         private readonly ITestOutputHelper output = null;
         private readonly ClientStreamTestRunner runner;
 
+        private Fixture fixture;
+
         public MemoryStreamProviderClientTests(Fixture fixture)
         {
+            this.fixture = fixture;
             runner = new ClientStreamTestRunner(fixture.HostedCluster);
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Streaming")]
         public async Task MemoryStreamProducerOnDroppedClientTest()
         {
-            logger.Info("************************ MemoryStreamProducerOnDroppedClientTest *********************************");
+            this.fixture.Logger.Info("************************ MemoryStreamProducerOnDroppedClientTest *********************************");
             await runner.StreamProducerOnDroppedClientTest(Fixture.StreamProviderName, Fixture.StreamNamespace);
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Streaming")]
         public async Task MemoryStreamConsumerOnDroppedClientTest()
         {
-            logger.Info("************************ MemoryStreamConsumerOnDroppedClientTest *********************************");
+            this.fixture.Logger.Info("************************ MemoryStreamConsumerOnDroppedClientTest *********************************");
             await runner.StreamConsumerOnDroppedClientTest(Fixture.StreamProviderName, Fixture.StreamNamespace, output,
                     null, true);
         }

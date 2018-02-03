@@ -8,6 +8,10 @@ using Orleans;
 using Orleans.Providers;
 using Orleans.Runtime;
 using Orleans.Runtime.Configuration;
+using Orleans.Runtime.Scheduler;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Orleans.Runtime.TestHooks;
 
 namespace UnitTests.Stats
 {
@@ -52,7 +56,7 @@ namespace UnitTests.Stats
         {
             Trace.TraceInformation("{0} Init called", GetType().Name);
             Name = name;
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task Init(ClientConfiguration config, IPAddress address, string clientId)
@@ -64,50 +68,50 @@ namespace UnitTests.Stats
         {
             Trace.TraceInformation("{0} ReportMetrics called", GetType().Name);
             Interlocked.Increment(ref numMetricsCalls);
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
         public Task ReportStats(List<ICounter> statsCounters)
         {
             Trace.TraceInformation("{0} ReportStats called", GetType().Name);
             Interlocked.Increment(ref numStatsCalls);
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
-        public Task Init(bool isSilo, string storageConnectionString, string deploymentId, string address, string siloName,
+        public Task Init(bool isSilo, string storageConnectionString, string clusterId, string address, string siloName,
             string hostName)
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task Close()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
     }
 
-    public class MockStatsSiloCollector : MarshalByRefObject,
+    public class MockStatsSiloCollector :
         IStatisticsPublisher, ISiloMetricsDataPublisher, // Stats providers have to be both Stats and Metrics publishers
         IProvider // Needs to be IProvider as well as *Publisher
     {
         public string Name { get; private set; }
 
-        public long NumStatsCalls = -1;
-        public long NumMetricsCalls = -1;
+        private IStatsCollectorGrain grain;
+        private OrleansTaskScheduler taskScheduler;
+        private SchedulingContext schedulingContext;
+        private ILogger logger;
 
-        public MockStatsSiloCollector()
-        {
-            Trace.TraceInformation("{0} created", GetType().FullName);
-            NumStatsCalls = 0;
-            NumMetricsCalls = 0;
-        }
         public Task Init(string name, IProviderRuntime providerRuntime, IProviderConfiguration config)
         {
-            Trace.TraceInformation("{0} Init called", GetType().Name);
             Name = name;
-            return TaskDone.Done;
+            this.logger = providerRuntime.ServiceProvider.GetRequiredService<ILogger<MockStatsSiloCollector>>();
+            this.grain = providerRuntime.GrainFactory.GetGrain<IStatsCollectorGrain>(0);
+            this.taskScheduler = providerRuntime.ServiceProvider.GetRequiredService<OrleansTaskScheduler>();
+            this.schedulingContext = providerRuntime.ServiceProvider.GetRequiredService<TestHooksSystemTarget>().SchedulingContext;
+            logger.Info("{0} Init called", GetType().Name);
+            return Task.CompletedTask;
         }
 
-        public Task Init(string deploymentId, string storageConnectionString, SiloAddress siloAddress, string siloName,
+        public Task Init(string clusterId, string storageConnectionString, SiloAddress siloAddress, string siloName,
             IPEndPoint gateway, string hostName)
         {
             throw new NotImplementedException();
@@ -115,26 +119,26 @@ namespace UnitTests.Stats
 
         public Task ReportMetrics(ISiloPerformanceMetrics metricsData)
         {
-            Trace.TraceInformation("{0} ReportMetrics called", GetType().Name);
-            Interlocked.Increment(ref NumMetricsCalls);
-            return TaskDone.Done;
+            logger.Info("{0} ReportMetrics called", GetType().Name);
+            taskScheduler.QueueTask(() => grain.ReportMetricsCalled(), schedulingContext).Ignore();
+            return Task.CompletedTask;
         }
         public Task ReportStats(List<ICounter> statsCounters)
         {
-            Trace.TraceInformation("{0} ReportStats called", GetType().Name);
-            Interlocked.Increment(ref NumStatsCalls);
-            return TaskDone.Done;
+            logger.Info("{0} ReportStats called", GetType().Name);
+            taskScheduler.QueueTask(() => grain.ReportStatsCalled(), schedulingContext).Ignore();
+            return Task.CompletedTask;
         }
 
-        public Task Init(bool isSilo, string storageConnectionString, string deploymentId, string address, string siloName,
+        public Task Init(bool isSilo, string storageConnectionString, string clusterId, string address, string siloName,
             string hostName)
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
 
         public Task Close()
         {
-            return TaskDone.Done;
+            return Task.CompletedTask;
         }
     }
 }
